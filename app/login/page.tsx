@@ -1,12 +1,11 @@
 'use client';
 
 import { Suspense, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'; // Added searchParams for better redirect handling
 import { useAuth } from '@/components/providers/auth-provider';
 import { LogIn, Mail, Lock, Loader2, Shield, ShoppingBag } from 'lucide-react';
 import Link from 'next/link';
 
-// Reusable helper — keeps both code paths in sync
 function destinationFor(isAdmin: boolean) {
   return isAdmin ? '/admin' : '/dashboard';
 }
@@ -24,24 +23,26 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
-  const [email, setEmail]         = useState('');
-  const [password, setPassword]   = useState('');
-  const [error, setError]         = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, signIn, loading } = useAuth();
 
-  // ── Guard: already logged in ───────────────────────────────────────────────
-  // If the session is already active when the page loads, send them to the
-  // correct destination immediately — no need to show the form.
+  // Get the redirect URL if it exists (e.g., from middleware)
+  const callbackUrl = searchParams.get('callbackUrl');
+
   useEffect(() => {
     if (!loading && user) {
-      router.replace(destinationFor(user.is_admin));
+      // If we have a callbackUrl, go there. Otherwise, go to dashboard/admin.
+      const target = callbackUrl || destinationFor(user.is_admin);
+      router.replace(target);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, callbackUrl]);
 
-  // ── Form submit ────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
@@ -52,19 +53,23 @@ function LoginForm() {
 
       if (result.error) {
         setError(result.error);
+        setIsSubmitting(false);
         return;
       }
 
-      // result.user is guaranteed here (TypeScript discriminated union)
-      router.push(destinationFor(result.user.is_admin));
-    } catch {
+      // ── FIXED: Use window.location for a "Hard" redirect on Vercel ─────────
+      // Sometimes router.push is too fast for the session cookie to settle.
+      // A hard redirect ensures the new page sees the logged-in state.
+      const target = callbackUrl || destinationFor(result.user.is_admin);
+      window.location.href = target; 
+      
+    } catch (err) {
+      console.error('Login error:', err);
       setError('An unexpected error occurred. Please try again.');
-    } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Show nothing while we wait for the session check to finish
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -76,8 +81,6 @@ function LoginForm() {
   return (
     <main className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-
-        {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -93,7 +96,6 @@ function LoginForm() {
             <p className="text-slate-400 text-sm mt-1">Sign in to your account</p>
           </div>
 
-          {/* Error banner */}
           {error && (
             <div className="mb-6 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm text-center">
               {error}
@@ -101,11 +103,8 @@ function LoginForm() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Email */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Email Address
-              </label>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Email Address</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
@@ -120,11 +119,8 @@ function LoginForm() {
               </div>
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Password
-              </label>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
@@ -139,7 +135,6 @@ function LoginForm() {
               </div>
             </div>
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={isSubmitting}
